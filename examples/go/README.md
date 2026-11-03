@@ -51,6 +51,17 @@ go run ./getting-started/producer/main.go
 go run ./reader-consumer/main.go
 ```
 
+### Message Envelope
+
+JSON envelope pattern for polymorphic message handling:
+
+```bash
+go run ./message-envelope/producer/main.go
+go run ./message-envelope/consumer/main.go
+```
+
+Uses MessagesGenerator to create OrderCreated, OrderConfirmed, and OrderRejected messages wrapped in JSON envelopes for type identification.
+
 ## TLS Examples
 
 From the repository root, start a disposable TLS server with the development certificate pair and the same credential prerequisites:
