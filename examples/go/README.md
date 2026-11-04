@@ -1,6 +1,6 @@
 # Iggy Examples
 
-This directory contains a getting-started producer and consumer using the Go SDK over TCP, with optional TLS. To learn more about building applications with Iggy, please refer to the [getting started](https://iggy.apache.org/docs/introduction/getting-started) guide.
+This directory contains a getting-started producer and consumer using the Go SDK over TCP, with optional TLS, a consumer-group reader, and a message-envelope producer and consumer. To learn more about building applications with Iggy, please refer to the [getting started](https://iggy.apache.org/docs/introduction/getting-started) guide.
 
 ## Running Examples
 
@@ -60,7 +60,7 @@ go run ./message-envelope/producer/main.go
 go run ./message-envelope/consumer/main.go
 ```
 
-Uses MessagesGenerator to create OrderCreated, OrderConfirmed, and OrderRejected messages wrapped in JSON envelopes for type identification.
+Uses MessageGenerator to create OrderCreated, OrderConfirmed, and OrderRejected messages wrapped in JSON envelopes for type identification.
 
 ## TLS Examples
 

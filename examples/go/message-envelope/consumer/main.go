@@ -15,12 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
+// Message-envelope consumer reads the JSON envelopes of the message-envelope
+// producer and uses each envelope's message_type to decode its payload into
+// OrderCreated, OrderConfirmed or OrderRejected.
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"time"
@@ -31,6 +35,8 @@ import (
 	iggcon "github.com/apache/iggy/foreign/go/contracts"
 )
 
+// A dedicated stream keeps these envelopes apart from the plain-text
+// messages other examples write to the same server.
 var (
 	StreamID     = "message-envelope-stream"
 	TopicID      = "message-envelope-topic"
@@ -100,9 +106,18 @@ func main() {
 func consumeMessages(ctx context.Context, client iggcon.Client) error {
 	interval := 500 * time.Millisecond
 	log.Printf(
-		"Messages will be consumed from stream: %d, topic: %d, partition: %d with interval %s.",
+		"Messages will be consumed from stream: %s, topic: %s, partition: %d with interval %s.",
 		StreamID, TopicID, PartitionID, interval,
 	)
+
+	streamIdentifier, err := iggcon.NewIdentifier(StreamID)
+	if err != nil {
+		return err
+	}
+	topicIdentifier, err := iggcon.NewIdentifier(TopicID)
+	if err != nil {
+		return err
+	}
 
 	offset := uint64(0)
 	const messagePerBatch = 10
@@ -114,8 +129,6 @@ func consumeMessages(ctx context.Context, client iggcon.Client) error {
 			return nil
 		}
 
-		streamIdentifier, _ := iggcon.NewIdentifier(StreamID)
-		topicIdentifier, _ := iggcon.NewIdentifier(TopicID)
 		options := iggcon.DefaultPollOptions()
 		options.Count = messagePerBatch
 		pollMessages, err := client.
@@ -159,36 +172,31 @@ func consumeMessages(ctx context.Context, client iggcon.Client) error {
 }
 
 func handleMessage(message iggcon.IggyMessage) error {
+	offset := message.Header.Offset
 	envelope := &MessageEnvelope{}
 	if err := json.Unmarshal(message.Payload, envelope); err != nil {
-		return err
+		return fmt.Errorf("decode envelope at offset %d: %w", offset, err)
 	}
 	log.Printf("Handling message type: %s...", envelope.MessageType)
 	switch envelope.MessageType {
 	case orderCreatedType:
-		{
-			orderCreated := &OrderCreated{}
-			if err := json.Unmarshal([]byte(envelope.Payload), orderCreated); err != nil {
-				return err
-			}
-			log.Printf("Order Created: %+v", orderCreated)
+		orderCreated := &OrderCreated{}
+		if err := json.Unmarshal([]byte(envelope.Payload), orderCreated); err != nil {
+			return fmt.Errorf("decode %s payload at offset %d: %w", envelope.MessageType, offset, err)
 		}
+		log.Printf("Order Created: %+v", orderCreated)
 	case orderConfirmedType:
-		{
-			orderConfirmed := &OrderConfirmed{}
-			if err := json.Unmarshal([]byte(envelope.Payload), orderConfirmed); err != nil {
-				return err
-			}
-			log.Printf("Order Confirmed: %+v", orderConfirmed)
+		orderConfirmed := &OrderConfirmed{}
+		if err := json.Unmarshal([]byte(envelope.Payload), orderConfirmed); err != nil {
+			return fmt.Errorf("decode %s payload at offset %d: %w", envelope.MessageType, offset, err)
 		}
+		log.Printf("Order Confirmed: %+v", orderConfirmed)
 	case orderRejectedType:
-		{
-			orderRejected := &OrderRejected{}
-			if err := json.Unmarshal([]byte(envelope.Payload), &orderRejected); err != nil {
-				return err
-			}
-			log.Printf("Order Rejected: %+v", orderRejected)
+		orderRejected := &OrderRejected{}
+		if err := json.Unmarshal([]byte(envelope.Payload), orderRejected); err != nil {
+			return fmt.Errorf("decode %s payload at offset %d: %w", envelope.MessageType, offset, err)
 		}
+		log.Printf("Order Rejected: %+v", orderRejected)
 	default:
 		log.Printf("Received unknown message type: %s", envelope.MessageType)
 	}

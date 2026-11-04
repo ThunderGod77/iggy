@@ -15,6 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+// Message-envelope producer wraps OrderCreated, OrderConfirmed and
+// OrderRejected events in a JSON envelope whose message_type tells the
+// consumer how to decode the payload, so different types share one topic.
 package main
 
 import (
@@ -29,11 +32,12 @@ import (
 
 	"github.com/apache/iggy/examples/go/common"
 	"github.com/apache/iggy/foreign/go/client"
-	iggcon "github.com/apache/iggy/foreign/go/contracts"
-
 	"github.com/apache/iggy/foreign/go/client/tcp"
+	iggcon "github.com/apache/iggy/foreign/go/contracts"
 )
 
+// A dedicated stream keeps these envelopes apart from the plain-text
+// messages other examples write to the same server.
 var (
 	StreamID     = "message-envelope-stream"
 	TopicID      = "message-envelope-topic"
@@ -43,17 +47,6 @@ var (
 
 type SerializableMessage interface {
 	messageType() string
-}
-
-func encodeEnvelope(sm SerializableMessage) ([]byte, error) {
-	payload, err := json.Marshal(sm)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(MessageEnvelope{
-		MessageType: sm.messageType(),
-		Payload:     string(payload),
-	})
 }
 
 type OrderCreated struct {
@@ -95,39 +88,43 @@ const (
 	orderRejectedType  = "OrderRejected"
 )
 
+func encodeEnvelope(sm SerializableMessage) ([]byte, error) {
+	payload, err := json.Marshal(sm)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(MessageEnvelope{
+		MessageType: sm.messageType(),
+		Payload:     string(payload),
+	})
+}
+
 type MessageGenerator struct {
 	orderID int
 }
 
 func NewMessageGenerator() *MessageGenerator {
-	return &MessageGenerator{orderID: 0}
+	return &MessageGenerator{}
 }
 
-func (ms *MessageGenerator) generate() SerializableMessage {
-	ms.orderID += 1
-	messageType := ms.orderID % 3
-	switch messageType {
+func (g *MessageGenerator) generate() SerializableMessage {
+	g.orderID++
+	switch g.orderID % 3 {
 	case 0:
-		{
-			return &OrderCreated{
-				OrderID:    fmt.Sprintf("order-%d", ms.orderID),
-				CustomerID: fmt.Sprintf("customer-%d", rand.Intn(100)),
-				Amount:     rand.Intn(10000),
-			}
+		return &OrderCreated{
+			OrderID:    fmt.Sprintf("order-%d", g.orderID),
+			CustomerID: fmt.Sprintf("customer-%d", rand.Intn(100)),
+			Amount:     rand.Intn(10000),
 		}
 	case 1:
-		{
-			return &OrderConfirmed{
-				OrderID:   fmt.Sprintf("order-%d", ms.orderID),
-				Timestamp: time.Now().UnixMilli(),
-			}
+		return &OrderConfirmed{
+			OrderID:   fmt.Sprintf("order-%d", g.orderID),
+			Timestamp: time.Now().UnixMilli(),
 		}
 	default:
-		{
-			return &OrderRejected{
-				OrderID: fmt.Sprintf("order-%d", ms.orderID),
-				Reason:  "Insufficient balance",
-			}
+		return &OrderRejected{
+			OrderID: fmt.Sprintf("order-%d", g.orderID),
+			Reason:  "Insufficient balance",
 		}
 	}
 }
@@ -187,6 +184,15 @@ func produceMessages(ctx context.Context, client iggcon.Client) error {
 		"Messages will be sent to stream: %s, topic: %s, partition: %d with interval %s.",
 		StreamID, TopicID, PartitionID, interval)
 
+	streamIdentifier, err := iggcon.NewIdentifier(StreamID)
+	if err != nil {
+		return err
+	}
+	topicIdentifier, err := iggcon.NewIdentifier(TopicID)
+	if err != nil {
+		return err
+	}
+
 	messagesPerBatch := 10
 	sentBatches := uint32(0)
 	partitioning := iggcon.PartitionId(PartitionID)
@@ -208,14 +214,15 @@ func produceMessages(ctx context.Context, client iggcon.Client) error {
 			serializableMessage := messageGenerator.generate()
 			payload, err := encodeEnvelope(serializableMessage)
 			if err != nil {
-				return err
+				return fmt.Errorf("encode %s envelope: %w", serializableMessage.messageType(), err)
 			}
-			message, _ := iggcon.NewIggyMessage(payload)
+			message, err := iggcon.NewIggyMessage(payload)
+			if err != nil {
+				return fmt.Errorf("build message: %w", err)
+			}
 			messages = append(messages, message)
 		}
 
-		streamIdentifier, _ := iggcon.NewIdentifier(StreamID)
-		topicIdentifier, _ := iggcon.NewIdentifier(TopicID)
 		if _, err := client.SendMessages(
 			ctx,
 			streamIdentifier,
